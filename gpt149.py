@@ -11,7 +11,7 @@ import torch.nn as nn
 from torch.nn import functional as F
 from torch.utils.cpp_extension import load
 from torch.profiler import profile, record_function, ProfilerActivity
-import module_ref as ms
+#import module_ref as mr
 
 NUM_THREADS=8
 torch.set_num_threads(NUM_THREADS)
@@ -20,7 +20,10 @@ ispc_path = getcwd() + "/module_ispc.o"
 if not path.exists(ispc_path): ispc_path = ""
 
 print("\nCompiling code into a PyTorch module...\n\n")
-mr = load(name="custom_module", sources=["module.cpp"],  extra_cflags=["-mavx", "-O3", "-fopenmp"], extra_ldflags=[ispc_path])
+ms = load(name="custom_module", sources=["module.cpp"],  extra_cflags=["-mavx", "-O0", "-g", "-fopenmp"], extra_ldflags=["-g", "-ldnnl"])
+
+# provided reference binary is not compatible with my pytorch
+mr = ms
 correctness_error_message = "\n-------------------------------------------\n YOUR ATTENTION PRODUCED INCORRECT RESULTS"
 
 class CustomAttention(nn.Module):
@@ -40,11 +43,11 @@ class CustomAttention(nn.Module):
     #part 1
     def myUnfusedAttention(self):
         if self.isRef:
-            with record_function("STUDENT - NAIVE ATTENTION"):
+            with record_function("REFERENCE - NAIVE ATTENTION"):
                 temp = torch.zeros((self.N, self.N))
                 out = mr.myNaiveAttention(self.Q, self.K, self.V, temp, self.B, self.H, self.N, self.d)
             return out
-        with record_function("REFERENCE - NAIVE ATTENTION"):
+        with record_function("STUDENT - NAIVE ATTENTION"):
             temp = torch.zeros((self.N, self.N))
             out = ms.myNaiveAttention(self.Q, self.K, self.V, temp, self.B, self.H, self.N, self.d)
         return out
@@ -52,11 +55,11 @@ class CustomAttention(nn.Module):
     #part 2
     def myUnfusedAttentionBlocked(self):
         if self.isRef:
-            with record_function("STUDENT - BLOCKED MATMUL + UNFUSED SOFTMAX"):
+            with record_function("REFERENCE - BLOCKED MATMUL + UNFUSED SOFTMAX"):
                 temp = torch.zeros((self.N, self.N))
                 out = mr.myUnfusedAttentionBlocked(self.Q, self.K, self.V, temp, self.B, self.H, self.N, self.d)
             return out 
-        with record_function("REFERENCE - BLOCKED MATMUL + UNFUSED SOFTMAX"):
+        with record_function("STUDENT - BLOCKED MATMUL + UNFUSED SOFTMAX"):
             temp = torch.zeros((self.N, self.N))
             out = ms.myUnfusedAttentionBlocked(self.Q, self.K, self.V, temp, self.B, self.H, self.N, self.d)
         return out
@@ -64,11 +67,11 @@ class CustomAttention(nn.Module):
     #part 3
     def myFusedAttention(self):
         if self.isRef:
-            with record_function("STUDENT - FUSED ATTENTION"):
+            with record_function("REFERENCE - FUSED ATTENTION"):
                 temp = torch.zeros((NUM_THREADS, self.N))
                 out = mr.myFusedAttention(self.Q, self.K, self.V, temp, self.B, self.H, self.N, self.d)
             return out
-        with record_function("REFERENCE - FUSED ATTENTION"):
+        with record_function("STUDENT - FUSED ATTENTION"):
             temp = torch.zeros((NUM_THREADS, self.N))
             out = ms.myFusedAttention(self.Q, self.K, self.V, temp, self.B, self.H, self.N, self.d)
         return out
@@ -89,10 +92,10 @@ class CustomAttention(nn.Module):
         Li = torch.zeros((self.br))
 
         if self.isRef:
-            with record_function("STUDENT - FLASH ATTENTION"):
+            with record_function("REFERENCE - FLASH ATTENTION"):
                 out = mr.myFlashAttention(self.Q, self.K, self.V, Qi, Kj, Vj, Sij, Pij, PV, Oi, L, Li, Lij, Lnew, self.bc, self.br, self.B, self.H, self.N, self.d)
             return out
-        with record_function("REFERENCE - FLASH ATTENTION"):
+        with record_function("STUDENT - FLASH ATTENTION"):
             #out = ms.myFlashAttention(self.Q, self.K, self.V, self.B, self.H, self.N, self.d, self.blockSize)
             out = ms.myFlashAttention(self.Q, self.K, self.V, Qi, Kj, Vj, Sij, Pij, PV, Oi, L, Li, Lij, Lnew, self.bc, self.br, self.B, self.H, self.N, self.d)
         return out
@@ -202,11 +205,11 @@ def part1Test(N, d, B, H):
     attentionModuleStudent = CustomAttention(Q,K,V, B, H, N, d)
     attentionModuleReference = CustomAttention(Q,K,V, B, H, N, d, True)
     params = (N, d, B, H)
-    print("-----RUNNING REFERENCE IMPLEMENTATION-----\n")
-    testTemplate(attentionModuleStudent.myUnfusedAttention, params, "REFERENCE - NAIVE ATTENTION")
-    time.sleep(3)
+    #print("-----RUNNING REFERENCE IMPLEMENTATION-----\n")
+    #testTemplate(attentionModuleReference.myUnfusedAttention, params, "REFERENCE - NAIVE ATTENTION")
+    #time.sleep(3)
     print("-----RUNNING STUDENT IMPLEMENTATION-----\n")
-    testTemplate(attentionModuleReference.myUnfusedAttention, params, "STUDENT - NAIVE ATTENTION")
+    testTemplate(attentionModuleStudent.myUnfusedAttention, params, "STUDENT - NAIVE ATTENTION")
 
 def part2Test(N, d, B, H):
     print("Running Part 2 Test: Unfused Attention with Blocked Matmul\n")
@@ -259,6 +262,27 @@ def accessTest(B, H, N, d):
     print("Result:", result)
     assert abs(expected - result) < 1e-5
     
+def softmaxTest(X, Y):
+    t = torch.rand(X, Y)
+    print(f"Softmax in: {t}\n")
+    ms.softmax_(t, 1)
+    ms.wait()
+    print(f"       out: {t}\n")
+
+def createM12(N):
+    M1 = torch.rand(N, N)
+    M2 = torch.rand(N, N)
+    return M1,M2
+    
+def asyncTest(N):
+    M1, M2 = createM12(N)
+    start = time.time()
+    for i in range(100):
+        res = M1 @ M2
+    end = time.time()
+    print((f"Problem size: {N}x{N}\n"
+           f"Elapsed time: {end - start:.4f}\n"))
+
 def main():
 
     d=32
@@ -266,7 +290,7 @@ def main():
     H=4
     
     parser = argparse.ArgumentParser()
-    parser.add_argument("testname", default="part0", help="name of test to run: part0, part1, part2, part3, part4, 4Daccess")
+    parser.add_argument("testname", default="part0", help="name of test to run: part0, part1, part2, part3, part4, 4Daccess, softmax_")
     parser.add_argument("-m", "--model", default="shakes128", help="name of model to use: shakes128, shakes1024, shakes2048, kayvon")
     parser.add_argument("--inference", action="store_true", default=False, help="run gpt inference")
     parser.add_argument("-bc",  default="256", help="Flash Attention Bc Size")
@@ -293,7 +317,9 @@ def main():
     
     if args.inference == False:
         N = int(args.N)
-        if args.testname == "part0":
+        if args.testname == "async":
+            asyncTest(N)
+        elif args.testname == "part0":
             part0Test(N, d, B, H)
         elif args.testname == "part1":
             part1Test(N, d, B, H)
@@ -305,6 +331,8 @@ def main():
             part4Test(N, d, B, H, int(args.bc), int(args.br))
         elif args.testname == "4Daccess":
             accessTest(1, 2, 4, 4)
+        elif args.testname == "softmax":
+            softmaxTest(2, 4)
         else:
             print("Unknown test name: %s" % args.testname)
     else:

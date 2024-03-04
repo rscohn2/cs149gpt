@@ -6,6 +6,9 @@
 #include <vector>
 #include <immintrin.h>
 
+#include "oneapi/dnnl/dnnl.hpp"
+#include "cs149.hpp"
+
 // Uncomment for ISPC
 //#include "module_ispc.h"
 //using namespace ispc;
@@ -27,19 +30,20 @@ inline void twoDimWrite(std::vector<float> &tensor, int &x, int &y, const int &s
 // Step #2: Implement Read/Write Accessors for a 4D Tensor
 inline float fourDimRead(std::vector<float> &tensor, int &x, int &y, int &z, int &b, 
         const int &sizeX, const int &sizeY, const int &sizeZ) {
-    return 0.0;
+  return tensor[(((x * sizeX) + y) * sizeY + z) * sizeZ + b];
 }
 
 inline void fourDimWrite(std::vector<float> &tensor, int &x, int &y, int &z, int &b, 
         const int &sizeX, const int &sizeY, const int &sizeZ, float &val) {
-    return; 
+  tensor[(((x * sizeX) + y) * sizeY + z) * sizeZ + b] = val;
 }
 
 // DO NOT EDIT THIS FUNCTION //
-std::vector<float> formatTensor(torch::Tensor tensor) {
+template <typename T>
+std::vector<T> formatTensor(torch::Tensor tensor) {
     tensor = tensor.flatten();
     tensor = tensor.contiguous();
-    std::vector<float> vec(tensor.data_ptr<float>(), tensor.data_ptr<float>() + tensor.numel());
+    std::vector<T> vec(tensor.data_ptr<T>(), tensor.data_ptr<T>() + tensor.numel());
     return vec;
 }
 
@@ -74,6 +78,7 @@ std::vector<float> formatTensor(torch::Tensor tensor) {
 torch::Tensor myNaiveAttention(torch::Tensor QTensor, torch::Tensor KTensor, torch::Tensor VTensor, torch::Tensor QK_tTensor,
                 int B, int H, int N, int d){
 
+  using T = float;
     // Q, K, V are passed in with Shape: (B, H, N, d)
     //QK^t Intermediate Tensor has Shape (N, N)
     
@@ -81,13 +86,13 @@ torch::Tensor myNaiveAttention(torch::Tensor QTensor, torch::Tensor KTensor, tor
     at::Tensor OTensor = at::zeros({B, H, N, d}, at::kFloat);
 
     //Format O, Q, K, and V tensors into 4D vectors
-    std::vector<float> O = formatTensor(OTensor);
-    std::vector<float> Q = formatTensor(QTensor);
-    std::vector<float> K = formatTensor(KTensor);
-    std::vector<float> V = formatTensor(VTensor);
+    std::vector<float> O = formatTensor<T>(OTensor);
+    std::vector<float> Q = formatTensor<T>(QTensor);
+    std::vector<float> K = formatTensor<T>(KTensor);
+    std::vector<float> V = formatTensor<T>(VTensor);
 
     //Format QK_t Tensor into a 2D vector.
-    std::vector<float> QK_t = formatTensor(QK_tTensor);
+    std::vector<float> QK_t = formatTensor<T>(QK_tTensor);
     
     /* Here is an example of how to read/write 0's to  Q (B, H, N, d) using the 4D accessors
 
@@ -137,6 +142,7 @@ torch::Tensor myNaiveAttention(torch::Tensor QTensor, torch::Tensor KTensor, tor
 torch::Tensor myUnfusedAttentionBlocked(torch::Tensor QTensor, torch::Tensor KTensor, torch::Tensor VTensor, torch::Tensor QK_tTensor,
                 int B, int H, int N, int d){
     
+  using T = float;
     // Q, K, V are passed in with Shape: (B, H, N, d)
     //QK^t Intermediate Tensor has Shape (N, N)
 
@@ -144,13 +150,13 @@ torch::Tensor myUnfusedAttentionBlocked(torch::Tensor QTensor, torch::Tensor KTe
     at::Tensor OTensor = at::zeros({B, H, N, d}, at::kFloat);
 
     //Format O, Q, K, and V tensors into 4D vectors
-    std::vector<float> O = formatTensor(OTensor);
-    std::vector<float> Q = formatTensor(QTensor);
-    std::vector<float> K = formatTensor(KTensor);
-    std::vector<float> V = formatTensor(VTensor);
+    std::vector<float> O = formatTensor<T>(OTensor);
+    std::vector<float> Q = formatTensor<T>(QTensor);
+    std::vector<float> K = formatTensor<T>(KTensor);
+    std::vector<float> V = formatTensor<T>(VTensor);
 
     //Format QK_t Tensor into a 2D vector.
-    std::vector<float> QK_t = formatTensor(QK_tTensor);
+    std::vector<float> QK_t = formatTensor<T>(QK_tTensor);
 
     // -------- YOUR CODE HERE  -------- //
 
@@ -167,6 +173,7 @@ torch::Tensor myUnfusedAttentionBlocked(torch::Tensor QTensor, torch::Tensor KTe
 torch::Tensor myFusedAttention(torch::Tensor QTensor, torch::Tensor KTensor, torch::Tensor VTensor, torch::Tensor temp,
                 int B, int H, int N, int d){
 
+  using T = float;
     // Q, K, V are passed in with Shape: (B, H, N, d)
 
     //Make O Tensor with Shape (B, H, N, d)
@@ -175,14 +182,14 @@ torch::Tensor myFusedAttention(torch::Tensor QTensor, torch::Tensor KTensor, tor
     at::Tensor ORowTensor = at::zeros({N}, at::kFloat);
 
     //Format Y, Q, K, and V tensors into 4D vectors
-    std::vector<float> O = formatTensor(OTensor);
-    std::vector<float> Q = formatTensor(QTensor);
-    std::vector<float> K = formatTensor(KTensor);
-    std::vector<float> V = formatTensor(VTensor);
+    std::vector<float> O = formatTensor<T>(OTensor);
+    std::vector<float> Q = formatTensor<T>(QTensor);
+    std::vector<float> K = formatTensor<T>(KTensor);
+    std::vector<float> V = formatTensor<T>(VTensor);
     
     //Format ORow Tensor into a 1D vector
     // You can simply access this as ORow[i]
-    std::vector<float> ORow = formatTensor(ORowTensor);
+    std::vector<float> ORow = formatTensor<T>(ORowTensor);
 
 
     // -------- YOUR CODE HERE  -------- //
@@ -196,7 +203,7 @@ torch::Tensor myFusedAttention(torch::Tensor QTensor, torch::Tensor KTensor, tor
 
 		// YRow is moved inside so each OpenMP thread gets a local copy.
                 at::Tensor ORowTensor = temp.index({torch::indexing::Slice(omp_get_thread_num(), torch::indexing::None)});      
-                std::vector<float> ORow = formatTensor(ORowTensor);
+                std::vector<float> ORow = formatTensor<T>(ORowTensor);
 		//YOUR CODE HERE
             }
 	}
@@ -219,6 +226,7 @@ torch::Tensor myFlashAttention(torch::Tensor QTensor, torch::Tensor KTensor, tor
                torch::Tensor OiTensor, torch::Tensor LTensor,  torch::Tensor LiTensor, 
 	       torch::Tensor LijTensor, torch::Tensor LnewTensor, int Bc, int Br,
                 int B, int H, int N, int d) {
+  using T = float;
         
     // Q, K, V are passed in with Shape: (B, H, N, d)
     // Sij, Pij are passed in with Shape: (Br, Bc)
@@ -231,21 +239,21 @@ torch::Tensor myFlashAttention(torch::Tensor QTensor, torch::Tensor KTensor, tor
     at::Tensor OTensor = at::zeros({B, H, N, d}, at::kFloat);
    
     //Format All Tensors into Vectors
-    std::vector<float> O = formatTensor(OTensor);
-    std::vector<float> Q = formatTensor(QTensor);
-    std::vector<float> K = formatTensor(KTensor);
-    std::vector<float> V = formatTensor(VTensor);
-    std::vector<float> Sij = formatTensor(SijTensor);
-    std::vector<float> Pij = formatTensor(PijTensor);
-    std::vector<float> Kj = formatTensor(KjTensor);
-    std::vector<float> Vj = formatTensor(VjTensor);
-    std::vector<float> Qi = formatTensor(QiTensor);
-    std::vector<float> Oi = formatTensor(OiTensor);
-    std::vector<float> l = formatTensor(LTensor);
-    std::vector<float> PV = formatTensor(PVTensor);
-    std::vector<float> li = formatTensor(LiTensor);
-    std::vector<float> lij = formatTensor(LijTensor);
-    std::vector<float> lnew = formatTensor(LnewTensor);
+    std::vector<float> O = formatTensor<T>(OTensor);
+    std::vector<float> Q = formatTensor<T>(QTensor);
+    std::vector<float> K = formatTensor<T>(KTensor);
+    std::vector<float> V = formatTensor<T>(VTensor);
+    std::vector<float> Sij = formatTensor<T>(SijTensor);
+    std::vector<float> Pij = formatTensor<T>(PijTensor);
+    std::vector<float> Kj = formatTensor<T>(KjTensor);
+    std::vector<float> Vj = formatTensor<T>(VjTensor);
+    std::vector<float> Qi = formatTensor<T>(QiTensor);
+    std::vector<float> Oi = formatTensor<T>(OiTensor);
+    std::vector<float> l = formatTensor<T>(LTensor);
+    std::vector<float> PV = formatTensor<T>(PVTensor);
+    std::vector<float> li = formatTensor<T>(LiTensor);
+    std::vector<float> lij = formatTensor<T>(LijTensor);
+    std::vector<float> lnew = formatTensor<T>(LnewTensor);
 
     // -------- YOUR CODE HERE  -------- //
 
@@ -254,6 +262,24 @@ torch::Tensor myFlashAttention(torch::Tensor QTensor, torch::Tensor KTensor, tor
     return torch::from_blob(O.data(), {B, H, N, d}, torch::TensorOptions().dtype(torch::kFloat32)).clone();
 }
 
+onednn_engine onednn(dnnl::engine::kind::cpu);
+
+template <typename T>
+auto torch_type() {
+  static_assert(std::is_same_v<float, T>);
+  return torch::TensorOptions().dtype(torch::kFloat32);
+}
+
+void softmax_(torch::Tensor tensor, int axis) {
+  using T = float;
+  auto dims = tensor.sizes();
+  T *data = tensor.data_ptr<T>();
+  onednn.softmax_(dims.vec(), axis, data);
+}
+
+void wait() {
+  onednn.wait();
+}
 
 /* DO NOT EDIT THESE BINDINGS */
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
@@ -263,4 +289,6 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   m.def("myFlashAttention", &myFlashAttention, "Flash Attention");
   m.def("twoDimRead", &twoDimRead, "twoDimRead");
   m.def("fourDimRead", &fourDimRead, "fourDimRead");
+  m.def("softmax_", &softmax_, "softmax_");
+  m.def("wait", &wait, "wait");
 }
